@@ -198,6 +198,12 @@ class Transformer(nn.Module):
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
 
+    def forward_with_sequence_embedding(self, x: torch.Tensor, layer_index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        embeddings = []
+        for block in self.resblocks:
+            x = block(x)
+            embeddings.append(x)
+        return x, embeddings[layer_index]
 
 class VisionTransformer(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
@@ -235,7 +241,7 @@ class VisionTransformer(nn.Module):
 
         return x
 
-    def forward_with_sequence_embedding(self, x: torch.Tensor):
+    def forward_with_sequence_embedding(self, x: torch.Tensor, layer_index: int):
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
@@ -244,8 +250,9 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
-        x = sequence_embedding = x.permute(1, 0, 2)  # LND -> NLD
+        x, sequence_embedding = self.transformer.forward_with_sequence_embedding(x, layer_index)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+        sequence_embedding = sequence_embedding.permute(1, 0, 2) # LND -> NLD
 
         x = self.ln_post(x[:, 0, :])
 
@@ -355,10 +362,10 @@ class CLIP(nn.Module):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
-    def encode_image_with_sequence_embedding(self, image):
+    def encode_image_with_sequence_embedding(self, image, layer_index: int = -1):
         assert isinstance(self.visual, VisionTransformer)
         image = image.type(self.dtype)
-        return self.visual.forward_with_sequence_embedding(image)
+        return self.visual.forward_with_sequence_embedding(image, layer_index)
 
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
